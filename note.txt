@@ -1,0 +1,353 @@
+perbaiki kode supaya dapat digunakan untuk registrasi user
+
+App.js
+import { createRoot } from 'react-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import Navbar from './components/Navbar';
+import Home from './pages/Home';
+import Register from './pages/Auth/Register';
+import Login from './pages/Auth/Login';
+import PageNotFound from './pages/404';
+
+const App = () => (
+  <Router>
+    <Routes>
+      <Route path="/" element={<Navbar />}>
+        <Route index element={<Home />} />
+        <Route path="login" element={<Login />} />
+        <Route path="register" element={<Register />} />
+        <Route path="*" element={<PageNotFound />} />
+      </Route>
+    </Routes>
+  </Router>
+);
+
+const root = createRoot(document.getElementById('root'));
+root.render(<App />);
+
+export default App;
+
+Auth/Register.js
+import React, { useState } from "react";
+
+const Register = () => {
+  const [name, setName] = useState("");
+  const [gender, setGender] = useState("");
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [email, setEmail] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  const handleRegister = async () => {
+    try {
+      const response = await fetch("http://localhost:5000/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          gender,
+          date_of_birth: dateOfBirth,
+          email,
+          phone_number: phoneNumber,
+          password,
+          confirm_password: confirmPassword,
+        }),
+      });
+
+      const result = await response.json();
+      console.log(result);
+    } catch (error) {
+      console.error("Gagal mendaftar", error);
+    }
+  };
+
+  return (
+    <div>
+      <h2>Registrasi</h2>
+      <label>
+        Nama
+        <input
+          type="text"
+          placeholder="Nama"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </label>
+
+      <label>
+        Jenis Kelamin
+        <select value={gender} onChange={(e) => setGender(e.target.value)}>
+          <option value="Male">Male</option>
+          <option value="Female">Female</option>
+        </select>
+      </label>
+
+      <label>
+        Tanggal Lahir
+        <input
+          type="date"
+          placeholder="Tanggal Lahir"
+          value={dateOfBirth}
+          onChange={(e) => setDateOfBirth(e.target.value)}
+        />
+      </label>
+
+      <label>
+        Email
+        <input
+          type="email"
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+      </label>
+
+      <label>
+        Nomor Telepon
+        <input
+          type="tel"
+          placeholder="Nomor Telepon"
+          value={phoneNumber}
+          onChange={(e) => setPhoneNumber(e.target.value)}
+        />
+      </label>
+
+      <label>
+        Password
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+      </label>
+
+      <label>
+        Konfirmasi Password
+        <input
+          type="password"
+          placeholder="Konfirmasi Password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+        />
+      </label>
+
+      <button onClick={handleRegister}>Daftar</button>
+    </div>
+  );
+};
+
+export default Register;
+
+server.js
+const express = require("express");
+const bodyParser = require("body-parser");
+const cors = require("cors");
+require("dotenv").config();
+
+const authRoutes = require("./routes/authRoutes");
+
+const app = express();
+const port = process.env.PORT || 5000;
+
+app.use(cors());
+app.use(bodyParser.json());
+
+app.use("/auth", authRoutes);
+
+app.listen(port, () => {
+  console.log(`Server listening on port ${port}`);
+});
+
+auth/authRoutes.js
+const express = require('express');
+const authController = require('../controllers/authController');
+const authenticationMiddleware = require('../middleware/authenticationMiddleware');
+
+const router = express.Router();
+
+router.post('/auth/register', authController.register);
+
+router.post('/login', authController.login);
+
+router.get('/profile', authenticationMiddleware.authenticateToken, (req, res) => {
+  res.json({ user: req.user });
+});
+
+module.exports = router;
+
+controllers/authController.js
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const userModel = require('../models/userModel');
+const responseUtils = require('../utils/responseUtils');
+
+const register = async (req, res) => {
+  try {
+    const {
+      name,
+      gender,
+      date_of_birth,
+      email,
+      phone_number,
+      password,
+      confirm_password,
+    } = req.body;
+
+    if (password !== confirm_password) {
+      return responseUtils.sendError(res, 400, 'Konfirmasi password tidak sama');
+    }
+
+    const hashedPassword = bcrypt.hashSync(password, 10);
+
+    const newUser = {
+      name,
+      gender,
+      date_of_birth,
+      email,
+      phone_number,
+      password: hashedPassword,
+    };
+
+    await userModel.register(newUser);
+
+    return responseUtils.sendSuccess(res, 'Berhasil mendaftar');
+  } catch (error) {
+    console.error(error);
+    return responseUtils.sendError(res, 500, 'Gagal mendaftar');
+  }
+};
+
+const login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const user = await userModel.findUserByEmail(email);
+
+    if (!user) {
+      return responseUtils.sendError(res, 401, 'Email tidak ditemukan');
+    }
+
+    const passwordMatch = bcrypt.compareSync(password, user.password);
+
+    if (!passwordMatch) {
+      return responseUtils.sendError(res, 401, 'Password salah');
+    }
+
+    const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, {
+      expiresIn: '1h',
+    });
+
+    return responseUtils.sendSuccess(res, 'Berhasil login', { token });
+  } catch (error) {
+    console.error(error);
+    return responseUtils.sendError(res, 500, 'Gagal login');
+  }
+};
+
+module.exports = {
+  register,
+  login,
+};
+
+models/userModel.js
+const db = require('../config/connection');
+
+const register = (userData) => {
+  return new Promise((resolve, reject) => {
+    const { name, gender, date_of_birth, email, phone_number, password } = userData;
+
+    db.query(
+      'INSERT INTO users (name, gender, date_of_birth, email, phone_number, password) VALUES (?, ?, ?, ?, ?, ?)',
+      [name, gender, date_of_birth, email, phone_number, password],
+      (err, result) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(result);
+        }
+      }
+    );
+  });
+};
+
+const login = (email) => {
+  return new Promise((resolve, reject) => {
+    db.query('SELECT * FROM users WHERE email = ?', [email], (err, result) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(result[0]);
+      }
+    });
+  });
+};
+
+module.exports = {
+  register,
+  login,
+};
+
+middleware/authtenticationMiddleware.js
+const jwt = require('jsonwebtoken');
+const responseUtils = require('../utils/responseUtils');
+
+const authenticateToken = (req, res, next) => {
+  const token = req.header('Authorization');
+
+  if (!token) {
+    return responseUtils.sendError(res, 401, 'Token tidak ditemukan');
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+    if (err) {
+      return responseUtils.sendError(res, 403, 'Token tidak valid');
+    }
+
+    req.user = user;
+    next();
+  });
+};
+
+module.exports = {
+  authenticateToken,
+};
+
+utils/responseUtils.js
+const sendSuccess = (res, message, data = null) => {
+    return res.status(200).json({
+      success: true,
+      message,
+      data,
+    });
+  };
+  
+  const sendError = (res, statusCode, message) => {
+    return res.status(statusCode).json({
+      success: false,
+      message,
+    });
+  };
+  
+  module.exports = {
+    sendSuccess,
+    sendError,
+  };
+
+myseller.sql
+CREATE DATABASE myseller;
+
+USE myseller;
+
+CREATE TABLE users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  gender ENUM('Male', 'Female') NOT NULL,
+  date_of_birth DATE NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  phone_number VARCHAR(15) NOT NULL,
+  password VARCHAR(255) NOT NULL
+);
